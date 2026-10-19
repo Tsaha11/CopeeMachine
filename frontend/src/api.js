@@ -1,7 +1,10 @@
 export class AuthError extends Error {}
 
+// Where the backend lives. Empty = same origin (dev proxy, or a host that proxies /api).
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
 export async function api(path, opts) {
-  const r = await fetch(path, opts)
+  const r = await fetch(API_BASE + path, { credentials: 'include', ...opts })
   if (r.status === 401 && !path.startsWith('/api/auth')) throw new AuthError('auth')
   const body = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(body.error || r.statusText)

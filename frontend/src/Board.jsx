@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, post, AuthError } from './api.js'
+import { api, post, AuthError, API_BASE } from './api.js'
 import Composer from './Composer.jsx'
 import NoteCard from './NoteCard.jsx'
 import Editor from './Editor.jsx'
@@ -23,7 +23,7 @@ export default function Board({ user, onLogout }) {
 
   // Live sync across this user's devices.
   useEffect(() => {
-    const es = new EventSource('/api/events')
+    const es = new EventSource(API_BASE + '/api/events', { withCredentials: true })
     es.onopen = () => api('/api/notes').then(setNotes).catch(guard)
     es.addEventListener('note', (e) => upsert(JSON.parse(e.data)))
     es.addEventListener('gone', (e) => {

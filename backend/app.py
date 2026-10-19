@@ -14,13 +14,13 @@ from html import escape
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, Response, abort, jsonify, request, send_from_directory, session
+from flask import Flask, Response, abort, jsonify, request, session
 from google.auth.transport import requests as grequests
 from google.oauth2 import id_token
 from pymongo import DESCENDING, MongoClient
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent  # the backend folder is self-contained
 load_dotenv(ROOT / ".env")
 
 PRODUCTION = os.environ.get("APP_ENV") == "production"
@@ -33,14 +33,22 @@ if PRODUCTION and DEV_LOGIN:
     raise SystemExit("COPEE_DEV_LOGIN must not be enabled when APP_ENV=production")
 if PRODUCTION and not COOKIE_SECURE:
     raise SystemExit("COOKIE_SECURE must be 1 when APP_ENV=production (serve over HTTPS)")
+# The frontend is hosted separately. List its origin(s) here, comma-separated, e.g. https://notes.example.com
+CORS_ORIGINS = {o.strip().rstrip("/") for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()}
+# "None" is needed when the frontend and API are on different sites (e.g. two *.onrender.com hosts);
+# "Lax" works when they share a registrable domain (app.example.com + api.example.com).
+SAMESITE = os.environ.get("COOKIE_SAMESITE", "Lax")
+if SAMESITE not in ("Lax", "None", "Strict"):
+    raise SystemExit("COOKIE_SAMESITE must be Lax, None or Strict")
+if SAMESITE == "None" and not COOKIE_SECURE:
+    raise SystemExit("COOKIE_SAMESITE=None requires COOKIE_SECURE=1 (HTTPS)")
 if not CLIENT_ID and not DEV_LOGIN:
     raise SystemExit("Set GOOGLE_CLIENT_ID in .env — see README for how to get one")
 if not MONGODB_URI:
     raise SystemExit("Set MONGODB_URI in .env")
 
-DATA = ROOT / "data"
-DIST = ROOT / "frontend" / "dist"
-DATA.mkdir(exist_ok=True)
+DATA = Path(os.environ.get("DATA_DIR") or ROOT / "data")
+DATA.mkdir(parents=True, exist_ok=True)
 
 _key = DATA / "secret"
 if not _key.exists():
@@ -54,7 +62,7 @@ if os.environ.get("TRUST_PROXY") == "1":  # behind nginx/Render/Fly etc: trust o
 app.config.update(
     MAX_CONTENT_LENGTH=1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SAMESITE=SAMESITE,
     SESSION_COOKIE_SECURE=COOKIE_SECURE,
     PERMANENT_SESSION_LIFETIME=30 * 24 * 3600,
 )
@@ -79,11 +87,8 @@ def note_json(n):
             "pinned": n["pinned"], "createdAt": n["created"], "updatedAt": n["updated"]}
 
 
-# Allows Google Identity Services (sign-in button + popup) and nothing else off-site.
-CSP = ("default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; "
-       "frame-src https://accounts.google.com/gsi/; connect-src 'self' https://accounts.google.com/gsi/; "
-       "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; "
-       "img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+# The API only returns JSON, so it needs no scripts, frames or images of its own.
+CSP = "default-src 'none'; frame-ancestors 'none'"
 
 
 @app.get("/healthz")
@@ -100,8 +105,14 @@ def headers(resp):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    # Google sign-in popup needs window.opener access.
-    resp.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    origin = request.headers.get("Origin", "").rstrip("/")
+    if origin and origin in CORS_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+        resp.headers["Access-Control-Max-Age"] = "600"
+        resp.headers.add("Vary", "Origin")
     if PRODUCTION:
         resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         resp.headers["Content-Security-Policy"] = CSP
@@ -114,12 +125,13 @@ PUBLIC = {"/api/config", "/api/me", "/api/auth/google", "/api/auth/dev"}
 @app.before_request
 def guard():
     p = request.path
-    if not p.startswith("/api/") or p in PUBLIC:
-        return
+    if request.method == "OPTIONS" or not p.startswith("/api/") or p in PUBLIC:
+        return  # CORS preflights carry no cookie; the real request is checked below
     if "user" not in session:
         return jsonify(error="Not logged in"), 401
     origin = request.headers.get("Origin")
-    if request.method != "GET" and origin and origin.split("://", 1)[-1] != request.host:
+    if (request.method != "GET" and origin and origin.rstrip("/") not in CORS_ORIGINS
+            and origin.split("://", 1)[-1] != request.host):
         return jsonify(error="Bad origin"), 403
 
 
@@ -290,18 +302,15 @@ def events():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-# ---------- built React app ----------
-@app.get("/", defaults={"path": ""})
-@app.get("/<path:path>")
-def spa(path):
-    if path.startswith("api/"):
-        abort(404)
-    target = DIST / path
-    if path and target.is_file() and DIST in target.resolve().parents:
-        return send_from_directory(DIST, path)
-    if not (DIST / "index.html").exists():
-        return "Frontend not built. Run: cd frontend && npm run build", 503
-    return send_from_directory(DIST, "index.html")
+# ---------- root ----------
+@app.get("/")
+def root():
+    return jsonify(service="copeemachine-api", ok=True)
+
+
+@app.errorhandler(404)
+def not_found(_):
+    return jsonify(error="Not found"), 404
 
 
 if __name__ == "__main__":
