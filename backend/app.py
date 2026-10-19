@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent  # the backend folder is self-contained
 load_dotenv(ROOT / ".env")
 
 PRODUCTION = os.environ.get("APP_ENV") == "production"
-CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 DEV_LOGIN = os.environ.get("COPEE_DEV_LOGIN") == "1"  # local testing only, never in production
 MONGODB_URI = os.environ.get("MONGODB_URI", "")
 MAX_TEXT = 200_000
@@ -100,7 +100,7 @@ def healthz():
         mongo.admin.command("ping")
     except Exception:
         return jsonify(ok=False), 503
-    return jsonify(ok=True)
+    return jsonify(ok=True, email=email_method())
 
 
 @app.after_request
@@ -238,9 +238,9 @@ def delete_note(nid):
 # ---------- email a note ----------
 # Two ways to send. Gmail API (HTTPS, works where SMTP ports are blocked, e.g. Render's free tier) is used
 # when GMAIL_REFRESH_TOKEN is set; otherwise SMTP. Both send FROM the owner's account TO the signed-in user.
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
-GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "")  # the Gmail account that authorized the refresh token
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()  # .strip(): pasted values often carry a stray space/newline
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "").strip()
+GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "").strip()  # the Gmail account that authorized the refresh token
 USE_GMAIL_API = bool(GMAIL_REFRESH_TOKEN and GOOGLE_CLIENT_SECRET and CLIENT_ID and GMAIL_SENDER)
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
@@ -250,6 +250,10 @@ SMTP_FROM = os.environ.get("SMTP_FROM", "") or SMTP_USER
 EMAIL_RE = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 EMAIL_LIMIT, EMAIL_WINDOW = 20, 3600  # per user per hour
 sent_log: dict[str, list] = defaultdict(list)
+
+
+def email_method():
+    return "gmail-api" if USE_GMAIL_API else "smtp" if (SMTP_HOST and SMTP_FROM) else "none"
 
 
 _gmail_token = {"value": "", "expires": 0.0}
@@ -272,7 +276,11 @@ def gmail_access_token():
             app.logger.error("gmail token refresh failed %s: %s", r.status_code, r.text[:200])
             if "invalid_grant" in r.text:
                 raise EmailError("Email authorization expired, the server owner must re-run gmail_authorize.py")
-            raise EmailError("Couldn't authorize with Gmail")
+            try:
+                reason = r.json().get("error", "")  # Google's code, e.g. invalid_client; never a secret
+            except ValueError:
+                reason = ""
+            raise EmailError("Couldn't authorize with Gmail" + (f" ({reason})" if reason else ""))
         d = r.json()
         _gmail_token.update(value=d["access_token"], expires=time.time() + int(d.get("expires_in", 3600)))
         return _gmail_token["value"]
