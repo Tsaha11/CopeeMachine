@@ -100,7 +100,7 @@ def healthz():
         mongo.admin.command("ping")
     except Exception:
         return jsonify(ok=False), 503
-    return jsonify(ok=True, email=email_method(), started=STARTED, fp=_fingerprints())  # TEMP diagnostic
+    return jsonify(ok=True, email=email_method())
 
 
 @app.after_request
@@ -250,15 +250,6 @@ SMTP_FROM = os.environ.get("SMTP_FROM", "") or SMTP_USER
 EMAIL_RE = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 EMAIL_LIMIT, EMAIL_WINDOW = 20, 3600  # per user per hour
 sent_log: dict[str, list] = defaultdict(list)
-
-
-STARTED = int(time.time())
-
-
-def _fingerprints():  # TEMP: 8 hex chars of a SHA-256 per credential, to compare deployed vs local values
-    import hashlib
-    h = lambda v: hashlib.sha256(v.encode()).hexdigest()[:8] if v else ""
-    return {"client_id": h(CLIENT_ID), "client_secret": h(GOOGLE_CLIENT_SECRET), "refresh_token": h(GMAIL_REFRESH_TOKEN)}
 
 
 def email_method():
