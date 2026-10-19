@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, post } from './api.js'
+import ThemeToggle from './ThemeToggle.jsx'
 
 function loadGoogle() {
   return new Promise((resolve, reject) => {
@@ -40,6 +41,7 @@ export default function Login({ onLogin }) {
   return (
     <div className="center">
       <div className="card login">
+        <ThemeToggle />
         <h1>☕ CopeeMachine</h1>
         <p className="muted">Your notes, on every device.</p>
         <div ref={btn} className="gbtn" />

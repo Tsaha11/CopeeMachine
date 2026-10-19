@@ -3,6 +3,7 @@ import { api, post, AuthError } from './api.js'
 import Composer from './Composer.jsx'
 import NoteCard from './NoteCard.jsx'
 import Editor from './Editor.jsx'
+import ThemeToggle from './ThemeToggle.jsx'
 
 export default function Board({ user, onLogout }) {
   const [notes, setNotes] = useState([])
@@ -52,6 +53,7 @@ export default function Board({ user, onLogout }) {
         <input className="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
         <span className="status">{status}</span>
         <div className="who">
+          <ThemeToggle />
           {user.picture && <img src={user.picture} alt="" referrerPolicy="no-referrer" />}
           <button className="link" onClick={logout} title={user.email}>Sign out</button>
         </div>
