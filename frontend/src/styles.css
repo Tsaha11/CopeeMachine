@@ -59,4 +59,4 @@ textarea{min-height:90px;resize:vertical}
 @media(max-width:560px){.top h1{display:none}}
 
 .link .ico{width:18px;height:18px;vertical-align:-4px;object-fit:contain}
-.mailto{flex:1;min-width:0;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);outline:none}
+.email-ico{color:var(--accent)}

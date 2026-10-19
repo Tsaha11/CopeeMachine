@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { del, patch, post } from './api.js'
-import { shareWhatsApp } from './share.js'
-import whatsappIcon from './img/whatsapp.png'
-import emailIcon from './img/email.png'
+import EmailIcon from './EmailIcon.jsx'
 
 export const COLORS = ['default', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray']
 
 export default function Editor({ note, onClose, onError }) {
   const [title, setTitle] = useState(note.title)
   const [body, setBody] = useState(note.body)
-  const [mailTo, setMailTo] = useState(null) // null = closed, string = recipient being typed
   const [mailState, setMailState] = useState('') // '', 'sending', 'sent'
   const dirty = useRef({})
   const timer = useRef(null)
@@ -33,13 +30,12 @@ export default function Editor({ note, onClose, onError }) {
 
   const act = (fn) => fn().catch(onError)
 
-  async function sendEmail(e) {
-    e.preventDefault()
+  async function sendEmail() {
     setMailState('sending')
     try {
       await flush()
-      await post(`/api/notes/${noteId}/email`, { to: mailTo })
-      setMailState('sent'); setMailTo(null)
+      await post(`/api/notes/${noteId}/email`, {})
+      setMailState('sent')
       setTimeout(() => setMailState(''), 3000)
     } catch (err) { setMailState(''); onError(err) }
   }
@@ -56,18 +52,10 @@ export default function Editor({ note, onClose, onError }) {
               <button key={c} className={`sw c-${c} ${note.color === c ? 'on' : ''}`} title={c}
                       onClick={() => act(() => patch(`/api/notes/${noteId}`, { color: c }))} />
         ))}</div>
-        {mailTo !== null && (
-          <form className="row" onSubmit={sendEmail}>
-            <input className="mailto" type="email" required autoFocus placeholder="Send to (email address)"
-                   value={mailTo} onChange={(e) => setMailTo(e.target.value)} />
-            <button className="btn" disabled={mailState === 'sending'}>{mailState === 'sending' ? 'Sending…' : 'Send'}</button>
-          </form>
-        )}
         <div className="row between">
           <div className="row">
             <button className="link" onClick={async () => { await flush(); await act(() => del(`/api/notes/${noteId}`)); onClose() }}>🗑 Delete</button>
-            <button className="link" title="Send via WhatsApp" onClick={() => shareWhatsApp(title, body)}><img className="ico" src={whatsappIcon} alt="" /> WhatsApp</button>
-            <button className="link" title="Send via email" onClick={() => setMailTo(mailTo === null ? '' : null)}><img className="ico" src={emailIcon} alt="" /> Email</button>
+            <button className="link" title="Email this note to yourself" disabled={mailState === 'sending'} onClick={sendEmail}><EmailIcon /> {mailState === 'sending' ? 'Sending…' : 'Email'}</button>
             {mailState === 'sent' && <span className="muted">Sent ✓</span>}
           </div>
           <button className="btn" onClick={close}>Close</button>

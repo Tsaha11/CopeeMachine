@@ -18,14 +18,21 @@ from flask import Flask, Response, abort, jsonify, request, send_from_directory,
 from google.auth.transport import requests as grequests
 from google.oauth2 import id_token
 from pymongo import DESCENDING, MongoClient
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
+PRODUCTION = os.environ.get("APP_ENV") == "production"
 CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 DEV_LOGIN = os.environ.get("COPEE_DEV_LOGIN") == "1"  # local testing only, never in production
 MONGODB_URI = os.environ.get("MONGODB_URI", "")
 MAX_TEXT = 200_000
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "1" if PRODUCTION else "0") == "1"
+if PRODUCTION and DEV_LOGIN:
+    raise SystemExit("COPEE_DEV_LOGIN must not be enabled when APP_ENV=production")
+if PRODUCTION and not COOKIE_SECURE:
+    raise SystemExit("COOKIE_SECURE must be 1 when APP_ENV=production (serve over HTTPS)")
 if not CLIENT_ID and not DEV_LOGIN:
     raise SystemExit("Set GOOGLE_CLIENT_ID in .env — see README for how to get one")
 if not MONGODB_URI:
@@ -41,12 +48,14 @@ if not _key.exists():
     _key.chmod(0o600)
 
 app = Flask(__name__, static_folder=None)
-app.secret_key = _key.read_text()
+app.secret_key = os.environ.get("SECRET_KEY") or _key.read_text()
+if os.environ.get("TRUST_PROXY") == "1":  # behind nginx/Render/Fly etc: trust one hop of X-Forwarded-*
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.config.update(
     MAX_CONTENT_LENGTH=1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1",
+    SESSION_COOKIE_SECURE=COOKIE_SECURE,
     PERMANENT_SESSION_LIFETIME=30 * 24 * 3600,
 )
 
@@ -70,6 +79,22 @@ def note_json(n):
             "pinned": n["pinned"], "createdAt": n["created"], "updatedAt": n["updated"]}
 
 
+# Allows Google Identity Services (sign-in button + popup) and nothing else off-site.
+CSP = ("default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; "
+       "frame-src https://accounts.google.com/gsi/; connect-src 'self' https://accounts.google.com/gsi/; "
+       "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; "
+       "img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+
+
+@app.get("/healthz")
+def healthz():
+    try:
+        mongo.admin.command("ping")
+    except Exception:
+        return jsonify(ok=False), 503
+    return jsonify(ok=True)
+
+
 @app.after_request
 def headers(resp):
     resp.headers["X-Frame-Options"] = "DENY"
@@ -77,6 +102,9 @@ def headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     # Google sign-in popup needs window.opener access.
     resp.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    if PRODUCTION:
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        resp.headers["Content-Security-Policy"] = CSP
     return resp
 
 
@@ -96,8 +124,9 @@ def guard():
 
 
 # ---------- auth ----------
-def sign_in(sub, email, name, picture):
-    users.update_one({"_id": sub}, {"$set": {"email": email, "name": name, "picture": picture}}, upsert=True)
+def sign_in(sub, email, name, picture, verified=False):
+    users.update_one({"_id": sub}, {"$set": {"email": email, "name": name, "picture": picture,
+                                              "verified": verified}}, upsert=True)
     session.clear()
     session["user"] = sub
     session.permanent = True
@@ -118,7 +147,7 @@ def auth_google():
         return jsonify(error="Google sign-in failed"), 401
     if not info.get("email_verified"):
         return jsonify(error="Email not verified"), 401
-    return sign_in(info["sub"], info["email"], info.get("name", ""), info.get("picture", ""))
+    return sign_in(info["sub"], info["email"], info.get("name", ""), info.get("picture", ""), verified=True)
 
 
 @app.post("/api/auth/dev")
@@ -206,9 +235,10 @@ sent_log: dict[str, list] = defaultdict(list)
 def email_note(nid):
     if not (SMTP_HOST and SMTP_FROM):
         return jsonify(error="Email isn't set up on the server (see SMTP_* in .env)"), 503
-    to = str((request.get_json(silent=True) or {}).get("to", "")).strip()
-    if len(to) > 254 or not EMAIL_RE.match(to):
-        return jsonify(error="Enter a valid email address"), 400
+    me = users.find_one({"_id": session["user"]}, {"email": 1, "name": 1, "verified": 1}) or {}
+    to = me.get("email", "")  # always the signed-in user's own Google address, never taken from the request
+    if not me.get("verified") or len(to) > 254 or not EMAIL_RE.match(to):
+        return jsonify(error="Sign in with Google to email notes to yourself"), 400
     n = notes.find_one({"_id": nid, "user": session["user"]})
     if not n:
         abort(404)
@@ -216,14 +246,11 @@ def email_note(nid):
     log = sent_log[session["user"]] = [t for t in sent_log[session["user"]] if now - t < EMAIL_WINDOW]
     if len(log) >= EMAIL_LIMIT:
         return jsonify(error="Too many emails sent, try again later"), 429
-    me = users.find_one({"_id": session["user"]}, {"email": 1, "name": 1}) or {}
 
     msg = EmailMessage()
     msg["Subject"] = " ".join((n["title"] or "Note").split())[:200]
     msg["From"] = f"{me.get('name') or 'CopeeMachine'} via CopeeMachine <{SMTP_FROM}>"
     msg["To"] = to
-    if me.get("email"):
-        msg["Reply-To"] = me["email"]
     title, body = n["title"].strip(), n["body"]
     msg.set_content("\n\n".join(x for x in (title, body, "Sent by CopeeMachine") if x))
     html_title = f"<b>{escape(title)}</b>" if title else ""
