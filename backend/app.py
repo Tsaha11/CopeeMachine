@@ -1,5 +1,6 @@
 """CopeeMachine backend: Google sign-in, then private Keep-style notes per user (MongoDB),
 synced live across that user's devices."""
+import base64
 import json
 import os
 import queue
@@ -7,12 +8,14 @@ import re
 import secrets
 import smtplib
 import ssl
+import threading
 import time
 from collections import defaultdict
 from email.message import EmailMessage
 from html import escape
 from pathlib import Path
 
+import requests as http
 from dotenv import load_dotenv
 from flask import Flask, Response, abort, jsonify, request, session
 from google.auth.transport import requests as grequests
@@ -232,7 +235,13 @@ def delete_note(nid):
     return jsonify(ok=True)
 
 
-# ---------- email a note (SMTP) ----------
+# ---------- email a note ----------
+# Two ways to send. Gmail API (HTTPS, works where SMTP ports are blocked, e.g. Render's free tier) is used
+# when GMAIL_REFRESH_TOKEN is set; otherwise SMTP. Both send FROM the owner's account TO the signed-in user.
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "")  # the Gmail account that authorized the refresh token
+USE_GMAIL_API = bool(GMAIL_REFRESH_TOKEN and GOOGLE_CLIENT_SECRET and CLIENT_ID and GMAIL_SENDER)
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
@@ -243,10 +252,55 @@ EMAIL_LIMIT, EMAIL_WINDOW = 20, 3600  # per user per hour
 sent_log: dict[str, list] = defaultdict(list)
 
 
+_gmail_token = {"value": "", "expires": 0.0}
+_gmail_lock = threading.Lock()
+
+
+class EmailError(Exception):
+    """Carries a message that is safe to show the user."""
+
+
+def gmail_access_token():
+    """Short-lived access token minted from the stored refresh token, cached until shortly before expiry."""
+    with _gmail_lock:
+        if _gmail_token["value"] and time.time() < _gmail_token["expires"] - 60:
+            return _gmail_token["value"]
+        r = http.post("https://oauth2.googleapis.com/token", timeout=15, data={
+            "client_id": CLIENT_ID, "client_secret": GOOGLE_CLIENT_SECRET,
+            "refresh_token": GMAIL_REFRESH_TOKEN, "grant_type": "refresh_token"})
+        if r.status_code != 200:
+            app.logger.error("gmail token refresh failed %s: %s", r.status_code, r.text[:200])
+            if "invalid_grant" in r.text:
+                raise EmailError("Email authorization expired, the server owner must re-run gmail_authorize.py")
+            raise EmailError("Couldn't authorize with Gmail")
+        d = r.json()
+        _gmail_token.update(value=d["access_token"], expires=time.time() + int(d.get("expires_in", 3600)))
+        return _gmail_token["value"]
+
+
+def send_via_gmail_api(msg):
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    r = http.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", timeout=15,
+                  headers={"Authorization": f"Bearer {gmail_access_token()}"}, json={"raw": raw})
+    if r.status_code == 401:  # token revoked mid-cache: drop it so the next try mints a new one
+        _gmail_token["value"] = ""
+    if r.status_code >= 400:
+        app.logger.error("gmail send failed %s: %s", r.status_code, r.text[:300])
+        raise EmailError("Gmail refused to send the email")
+
+
+def send_via_smtp(msg):
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+        s.starttls(context=ssl.create_default_context())
+        if SMTP_USER:
+            s.login(SMTP_USER, SMTP_PASSWORD)
+        s.send_message(msg)
+
+
 @app.post("/api/notes/<nid>/email")
 def email_note(nid):
-    if not (SMTP_HOST and SMTP_FROM):
-        return jsonify(error="Email isn't set up on the server (see SMTP_* in .env)"), 503
+    if not (USE_GMAIL_API or (SMTP_HOST and SMTP_FROM)):
+        return jsonify(error="Email isn't set up on the server (see GMAIL_* or SMTP_* in .env)"), 503
     me = users.find_one({"_id": session["user"]}, {"email": 1, "name": 1, "verified": 1}) or {}
     to = me.get("email", "")  # always the signed-in user's own Google address, never taken from the request
     if not me.get("verified") or len(to) > 254 or not EMAIL_RE.match(to):
@@ -261,7 +315,7 @@ def email_note(nid):
 
     msg = EmailMessage()
     msg["Subject"] = " ".join((n["title"] or "Note").split())[:200]
-    msg["From"] = f"{me.get('name') or 'CopeeMachine'} via CopeeMachine <{SMTP_FROM}>"
+    msg["From"] = f"{me.get('name') or 'CopeeMachine'} via CopeeMachine <{GMAIL_SENDER if USE_GMAIL_API else SMTP_FROM}>"
     msg["To"] = to
     title, body = n["title"].strip(), n["body"]
     msg.set_content("\n\n".join(x for x in (title, body, "Sent by CopeeMachine") if x))
@@ -270,14 +324,12 @@ def email_note(nid):
         f'<div style="white-space:pre-wrap">{html_title}{"<br><br>" if title and body else ""}{escape(body)}<br><br>Sent by CopeeMachine</div>',
         subtype="html")
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.starttls(context=ssl.create_default_context())
-            if SMTP_USER:
-                s.login(SMTP_USER, SMTP_PASSWORD)
-            s.send_message(msg)
+        (send_via_gmail_api if USE_GMAIL_API else send_via_smtp)(msg)
+    except EmailError as e:
+        return jsonify(error=str(e)), 502
     except Exception as e:
-        app.logger.error("email send failed: %s", e)
-        return jsonify(error="Couldn't send the email, check the server's SMTP settings"), 502
+        app.logger.error("email send failed: %s: %s", type(e).__name__, e)
+        return jsonify(error="Couldn't send the email, check the server's email settings"), 502
     log.append(now)
     return jsonify(ok=True)
 

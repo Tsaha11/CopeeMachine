@@ -27,11 +27,10 @@ services:
         value: copeemachine
       - key: GOOGLE_CLIENT_ID
         sync: false
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
+      # Email via the Gmail API (HTTPS). Render's free tier blocks SMTP, so no SMTP_* here.
+      - key: GOOGLE_CLIENT_SECRET
         sync: false
-      - key: SMTP_PASSWORD
+      - key: GMAIL_REFRESH_TOKEN   # from backend/scripts/gmail_authorize.py
+        sync: false
+      - key: GMAIL_SENDER          # the Gmail address that authorized it
         sync: false

@@ -21,11 +21,23 @@ The frontend finds the API through `VITE_API_URL`; the API allows the frontend t
    The backend's address does not go here.
 5. Put the Client ID in `backend/.env` as `GOOGLE_CLIENT_ID`.
 
-## 2. Email a note to yourself (SMTP)
+## 2. Email a note to yourself
 The **Email** button sends to the Google address you signed in with, never to a typed address.
-Gmail: enable 2-Step Verification, create an **App Password** (myaccount.google.com/apppasswords),
-and set `SMTP_HOST/PORT/USER/PASSWORD`. Limit: 20 emails per user per hour.
-Some hosts (including Render's free tier) block outbound SMTP ports; see Troubleshooting.
+The mail is sent *from* one owner Gmail account. Limit: 20 emails per user per hour.
+
+**Gmail API (recommended; works on Render's free tier, which blocks SMTP):**
+1. Cloud console: **APIs & Services → Library → Gmail API → Enable**.
+2. **Google Auth Platform → Data Access → Add scopes** → `https://www.googleapis.com/auth/gmail.send`.
+3. On the OAuth client, make sure `http://localhost:5050` is under **Authorized redirect URIs**.
+4. Put `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `backend/.env`, stop the Flask server, then run
+   `cd backend && ../.venv/bin/python scripts/gmail_authorize.py` and sign in with the sending Gmail account.
+5. Copy the printed `GMAIL_REFRESH_TOKEN` (plus `GMAIL_SENDER` and `GOOGLE_CLIENT_SECRET`) into the host's env.
+   The token only has permission to send mail; it cannot read your inbox.
+   **If the app is in "Testing", Google expires the token after 7 days;** publish the app (Audience → Publish)
+   for a long-lived one. You'll see an "unverified app" screen once during step 4; that's expected.
+
+**SMTP (local dev):** set `SMTP_HOST/PORT/USER/PASSWORD` (Gmail needs an App Password). Used only when
+`GMAIL_REFRESH_TOKEN` isn't set.
 
 ## 3. Run locally
 ```sh
@@ -44,7 +56,7 @@ Prerequisites: a MongoDB Atlas cluster, and this repo pushed to GitHub.
 1. **Atlas → Network Access**: allow `0.0.0.0/0` (Render's free tier has no fixed IP). Use a
    strong database password.
 2. **Render → New → Blueprint** → pick this repo. It reads `render.yaml` and creates `copeemachine-api`.
-3. Fill the prompted variables: `MONGODB_URI`, `GOOGLE_CLIENT_ID`, `SMTP_USER`, `SMTP_PASSWORD`,
+3. Fill the prompted variables: `MONGODB_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`, `GMAIL_SENDER`,
    and `CORS_ORIGINS` (put a placeholder like `https://localhost` for now; set the real frontend
    origin after step 5).
 4. After the deploy goes live, test it (replace the URL):
@@ -57,7 +69,7 @@ Prerequisites: a MongoDB Atlas cluster, and this repo pushed to GitHub.
 5. Deploy the frontend (next section), then set `CORS_ORIGINS` to its origin and redeploy.
 
 Variables the backend reads (see `backend/.env.example`): `APP_ENV=production`, `TRUST_PROXY=1`,
-`SECRET_KEY`, `MONGODB_URI/DB`, `GOOGLE_CLIENT_ID`, `CORS_ORIGINS`, `COOKIE_SAMESITE`, `SMTP_*`.
+`SECRET_KEY`, `MONGODB_URI/DB`, `GOOGLE_CLIENT_ID/SECRET`, `CORS_ORIGINS`, `COOKIE_SAMESITE`, `GMAIL_*` (or `SMTP_*`).
 
 **Docker instead:** `cd backend && docker build -t copeemachine-api . && docker run -p 8080:8080 --env-file .env -e COPEE_DEV_LOGIN= copeemachine-api`.
 
@@ -73,8 +85,9 @@ Safari and some privacy settings block it. For a dependable setup put both on on
 (`app.example.com` + `api.example.com`) and set `COOKIE_SAMESITE=Lax`.
 
 ## Troubleshooting
-- **"Email couldn't be sent" on Render's free tier:** outbound SMTP ports (25/465/587) may be blocked there.
-  Use a paid instance, or switch to an email provider's HTTPS API (Brevo, Resend, SendGrid).
+- **Email fails on Render with SMTP:** its free tier blocks SMTP ports; use the Gmail API method above.
+- **"Email authorization expired":** the refresh token was revoked or (in Testing mode) hit 7 days; re-run
+  `gmail_authorize.py` and update `GMAIL_REFRESH_TOKEN`.
 - **Browser says CORS error:** the page's exact origin isn't in `CORS_ORIGINS`.
 - **Signed in but immediately logged out:** the cookie is being blocked (see "Cookies across sites").
 - **Google "origin not allowed":** the frontend origin is missing from Authorized JavaScript origins.
