@@ -72,3 +72,46 @@ textarea{min-height:90px;resize:vertical}
 .loader .s2{animation-delay:.4s}
 @keyframes steam{0%{opacity:0;transform:translateY(6px)}50%{opacity:1}100%{opacity:0;transform:translateY(-6px)}}
 @media(prefers-reduced-motion:reduce){.loader .steam{animation:none;opacity:1}}
+
+/* Motion */
+:root{--ease:cubic-bezier(.22,.61,.36,1)}
+body,.card,.top,.search{transition:background-color .3s var(--ease),border-color .3s var(--ease),color .3s var(--ease)}
+.top,main{animation:fade-in .5s var(--ease) both}
+main{animation-delay:.05s}
+.note{animation:rise .45s var(--ease) backwards;transition:transform .25s var(--ease),box-shadow .25s var(--ease),background-color .3s var(--ease)}
+.note:hover{transform:translateY(-3px)}
+.note:active{transform:translateY(-1px) scale(.99)}
+.composer{transition:box-shadow .25s var(--ease),transform .25s var(--ease),background-color .3s var(--ease)}
+.composer.collapsed:hover{box-shadow:0 3px 10px #0003}
+.empty{animation:fade-in .6s var(--ease) both}
+.backdrop{animation:fade-in .2s ease both}
+.editor{animation:pop .3s var(--ease) backwards}
+.btn,.link,.icon,.sw,.search{transition:transform .15s var(--ease),opacity .2s,background-color .2s,color .2s,box-shadow .2s,border-color .2s}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 2px 8px #0003}
+.btn:active:not(:disabled){transform:translateY(0) scale(.97)}
+.sw:hover{transform:scale(1.15)}
+.sw.on{transform:scale(1.1)}
+.search:focus{border-color:var(--accent);box-shadow:0 0 0 3px #c2410c22}
+.pin{animation:pop .3s var(--ease) backwards}
+.loader svg{animation:bob 2.4s ease-in-out infinite}
+@keyframes fade-out{to{opacity:0}}
+@keyframes pop-out{to{opacity:0;transform:translateY(8px) scale(.97)}}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes expand{from{opacity:.6;transform:scale(.98)}to{opacity:1;transform:none}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+.loader.out{animation:fade-out .4s var(--ease) forwards;pointer-events:none}
+.backdrop.out{animation:fade-out .22s ease forwards}
+.backdrop.out .editor{animation:pop-out .22s var(--ease) forwards}
+.composer{gap:0;will-change:transform}
+.composer textarea{display:block;height:24px;min-height:0;resize:none;overflow:hidden;transition:height .4s var(--ease)}
+.composer.open textarea{height:110px;overflow:auto}
+.collapse{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .4s var(--ease),opacity .3s var(--ease),visibility 0s .4s}
+.collapse.open{grid-template-rows:1fr;opacity:1;visibility:visible;transition:grid-template-rows .4s var(--ease),opacity .3s var(--ease) .05s,visibility 0s}
+.collapse>div{overflow:hidden;min-height:0}
+.composer .title{padding-bottom:8px}
+.composer-foot{padding-top:8px}
+.note{will-change:transform}

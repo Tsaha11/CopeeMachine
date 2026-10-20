@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, post, AuthError, API_BASE } from './api.js'
 import Composer from './Composer.jsx'
 import NoteCard from './NoteCard.jsx'
 import Editor from './Editor.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
 import Loader from './Loader.jsx'
+import useFlip from './useFlip.js'
 
 export default function Board({ user, onLogout }) {
   const [notes, setNotes] = useState([])
   const [loaded, setLoaded] = useState(false)
+  const [showLoader, setShowLoader] = useState(true)
+  const pinnedRef = useRef(null)
+  const othersRef = useRef(null)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(null) // note id being edited
   const [status, setStatus] = useState('')
@@ -42,16 +46,23 @@ export default function Board({ user, onLogout }) {
   }, [notes, query])
   const pinned = shown.filter((n) => n.pinned)
   const others = shown.filter((n) => !n.pinned)
+  const order = shown.map((n) => n.id + n.pinned).join()
+  useFlip(pinnedRef, [order, loaded])
+  useFlip(othersRef, [order, loaded])
+  useEffect(() => {
+    if (!loaded) return
+    const t = setTimeout(() => setShowLoader(false), 450)
+    return () => clearTimeout(t)
+  }, [loaded])
 
   async function logout() {
     await post('/api/logout', {}).catch(() => {})
     onLogout()
   }
 
-  if (!loaded) return <Loader />
-
   return (
     <div>
+      {showLoader && <Loader leaving={loaded} />}
       <header className="top">
         <h1>☕ CopeeMachine</h1>
         <input className="search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -65,8 +76,8 @@ export default function Board({ user, onLogout }) {
       <main>
         <Composer onError={guard} />
         {notes.length === 0 && <p className="empty">Notes you add appear here — on all your devices.</p>}
-        {pinned.length > 0 && <><h2>Pinned</h2><div className="grid">{pinned.map((n) => <NoteCard key={n.id} note={n} onOpen={() => setOpen(n.id)} />)}</div></>}
-        {others.length > 0 && <>{pinned.length > 0 && <h2>Others</h2>}<div className="grid">{others.map((n) => <NoteCard key={n.id} note={n} onOpen={() => setOpen(n.id)} />)}</div></>}
+        {pinned.length > 0 && <><h2>Pinned</h2><div className="grid" ref={pinnedRef}>{pinned.map((n, i) => <NoteCard key={n.id} index={i} note={n} onOpen={() => setOpen(n.id)} />)}</div></>}
+        {others.length > 0 && <>{pinned.length > 0 && <h2>Others</h2>}<div className="grid" ref={othersRef}>{others.map((n, i) => <NoteCard key={n.id} index={i} note={n} onOpen={() => setOpen(n.id)} />)}</div></>}
       </main>
       {open && notes.find((n) => n.id === open) &&
         <Editor note={notes.find((n) => n.id === open)} onClose={() => setOpen(null)} onError={guard} />}

@@ -8,6 +8,7 @@ export default function Editor({ note, onClose, onError }) {
   const [title, setTitle] = useState(note.title)
   const [body, setBody] = useState(note.body)
   const [mailState, setMailState] = useState('') // '', 'sending', 'sent'
+  const [leaving, setLeaving] = useState(false)
   const dirty = useRef({})
   const timer = useRef(null)
   const noteId = note.id
@@ -25,7 +26,8 @@ export default function Editor({ note, onClose, onError }) {
     clearTimeout(timer.current)
     timer.current = setTimeout(flush, 600)
   }
-  const close = async () => { await flush(); onClose() }
+  const leave = () => { setLeaving(true); setTimeout(onClose, 220) }
+  const close = async () => { if (leaving) return; await flush(); leave() }
   useEffect(() => () => { flush() }, []) // eslint-disable-line
 
   const act = (fn) => fn().catch(onError)
@@ -41,7 +43,7 @@ export default function Editor({ note, onClose, onError }) {
   }
 
   return (
-    <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+    <div className={`backdrop${leaving ? ' out' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className={`card editor c-${note.color}`}>
         <div className="row between">
           <input className="title" placeholder="Title" value={title} onChange={(e) => { setTitle(e.target.value); edit('title', e.target.value) }} />
@@ -54,7 +56,7 @@ export default function Editor({ note, onClose, onError }) {
         ))}</div>
         <div className="row between">
           <div className="row">
-            <button className="link" onClick={async () => { await flush(); await act(() => del(`/api/notes/${noteId}`)); onClose() }}>🗑 Delete</button>
+            <button className="link" onClick={async () => { await flush(); await act(() => del(`/api/notes/${noteId}`)); leave() }}>🗑 Delete</button>
             <button className="link" title="Email this note to yourself" disabled={mailState === 'sending'} onClick={sendEmail}><EmailIcon /> {mailState === 'sending' ? 'Sending…' : 'Email'}</button>
             {mailState === 'sent' && <span className="muted">Sent ✓</span>}
           </div>

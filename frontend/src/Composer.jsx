@@ -20,26 +20,29 @@ export default function Composer({ onError }) {
     setBusy(false)
   }
 
-  if (!expanded) return (
-    <div className="card composer collapsed" onClick={() => setExpanded(true)}>
-      <span className="muted">Take a note…</span>
-    </div>
-  )
+  const reset = () => { setTitle(''); setBody(''); setColor('default'); setExpanded(false) }
+
   return (
-    <div className={`card composer c-${color}`}>
-      <input className="title" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <textarea autoFocus placeholder="Take a note…" value={body}
+    <div className={`card composer ${expanded ? `open c-${color}` : 'collapsed'}`}
+         onClick={() => !expanded && setExpanded(true)}>
+      <div className={`collapse${expanded ? ' open' : ''}`}><div>
+        <input className="title" placeholder="Title" tabIndex={expanded ? 0 : -1} value={title} onChange={(e) => setTitle(e.target.value)} />
+      </div></div>
+      <textarea placeholder="Take a note…" value={body} rows={1}
+                onFocus={() => setExpanded(true)}
                 onChange={(e) => setBody(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save() }} />
-      <div className="row between">
-        <div className="row">
-          <div className="swatches">{COLORS.map((c) => (
-            <button key={c} className={`sw c-${c} ${color === c ? 'on' : ''}`} title={c} onClick={() => setColor(c)} />
-          ))}</div>
-          <button className="link" onClick={() => { setTitle(''); setBody(''); setColor('default'); setExpanded(false) }}>Discard</button>
+      <div className={`collapse${expanded ? ' open' : ''}`}><div>
+        <div className="row between composer-foot">
+          <div className="row">
+            <div className="swatches">{COLORS.map((c) => (
+              <button key={c} className={`sw c-${c} ${color === c ? 'on' : ''}`} title={c} onClick={() => setColor(c)} />
+            ))}</div>
+            <button className="link" onClick={reset}>Discard</button>
+          </div>
+          <button className="btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Done'}</button>
         </div>
-        <button className="btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Done'}</button>
-      </div>
+      </div></div>
     </div>
   )
 }
