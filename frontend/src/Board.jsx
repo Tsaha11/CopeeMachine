@@ -4,9 +4,11 @@ import Composer from './Composer.jsx'
 import NoteCard from './NoteCard.jsx'
 import Editor from './Editor.jsx'
 import ThemeToggle from './ThemeToggle.jsx'
+import Loader from './Loader.jsx'
 
 export default function Board({ user, onLogout }) {
   const [notes, setNotes] = useState([])
+  const [loaded, setLoaded] = useState(false)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(null) // note id being edited
   const [status, setStatus] = useState('')
@@ -24,7 +26,7 @@ export default function Board({ user, onLogout }) {
   // Live sync across this user's devices.
   useEffect(() => {
     const es = new EventSource(API_BASE + '/api/events', { withCredentials: true })
-    es.onopen = () => api('/api/notes').then(setNotes).catch(guard)
+    es.onopen = () => api('/api/notes').then(setNotes).catch(guard).finally(() => setLoaded(true))
     es.addEventListener('note', (e) => upsert(JSON.parse(e.data)))
     es.addEventListener('gone', (e) => {
       const { id } = JSON.parse(e.data)
@@ -45,6 +47,8 @@ export default function Board({ user, onLogout }) {
     await post('/api/logout', {}).catch(() => {})
     onLogout()
   }
+
+  if (!loaded) return <Loader />
 
   return (
     <div>

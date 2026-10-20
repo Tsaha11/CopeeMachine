@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from './api.js'
 import Login from './Login.jsx'
 import Board from './Board.jsx'
+import Loader from './Loader.jsx'
 
 export default function App() {
   const [user, setUser] = useState(undefined) // undefined = checking, null = signed out
@@ -10,7 +11,7 @@ export default function App() {
     api('/api/me').then((d) => setUser(d.user)).catch(() => setUser(null))
   }, [])
 
-  if (user === undefined) return null
+  if (user === undefined) return <Loader />
   return user
     ? <Board user={user} onLogout={() => setUser(null)} />
     : <Login onLogin={setUser} />

@@ -7,7 +7,17 @@
     <title>CopeeMachine</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="loader" role="status" aria-label="Loading">
+        <svg viewBox="0 0 64 64" width="72" height="72" aria-hidden="true">
+          <path class="steam s1" d="M23 21c0-4.5 4.5-4.5 4.5-9" />
+          <path class="steam s2" d="M33 21c0-4.5 4.5-4.5 4.5-9" />
+          <path class="handle" d="M44 30h3.5a6.5 6.5 0 0 1 0 13H44" />
+          <path class="cup" d="M14 27h30v13a12 12 0 0 1-12 12h-6a12 12 0 0 1-12-12z" />
+        </svg>
+        <span>Brewing your notes…</span>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

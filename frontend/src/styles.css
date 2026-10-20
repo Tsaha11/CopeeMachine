@@ -64,3 +64,11 @@ textarea{min-height:90px;resize:vertical}
 .link .ico{width:18px;height:18px;vertical-align:-4px;object-fit:contain}
 .email-ico{color:var(--accent)}
 .theme{font-size:17px;line-height:1;padding:4px 6px}
+.loader{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;background:var(--bg);color:var(--muted);font-size:14px}
+.loader .cup{fill:var(--accent)}
+.loader .handle,.loader .steam{fill:none;stroke:var(--accent);stroke-linecap:round}
+.loader .handle{stroke-width:4}
+.loader .steam{stroke-width:3;animation:steam 1.6s ease-in-out infinite}
+.loader .s2{animation-delay:.4s}
+@keyframes steam{0%{opacity:0;transform:translateY(6px)}50%{opacity:1}100%{opacity:0;transform:translateY(-6px)}}
+@media(prefers-reduced-motion:reduce){.loader .steam{animation:none;opacity:1}}
