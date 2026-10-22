@@ -69,6 +69,7 @@ export default function Board({ user, onLogout }) {
         <span className="status">{status}</span>
         <div className="who">
           <ThemeToggle />
+          <a className="link" href="https://github.com/Tsaha11" target="_blank" rel="noreferrer">GitHub</a>
           {user.picture && <img src={user.picture} alt="" referrerPolicy="no-referrer" />}
           <button className="link" onClick={logout} title={user.email}>Sign out</button>
         </div>

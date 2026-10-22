@@ -47,6 +47,7 @@ export default function Login({ onLogin }) {
         <div ref={btn} className="gbtn" />
         {dev && <button className="btn ghost" onClick={async () => onLogin((await post('/api/auth/dev', { name: 'dev' })).user)}>Dev sign-in</button>}
         <p className="err">{err}</p>
+        <a className="link" href="https://github.com/Tsaha11" target="_blank" rel="noreferrer">GitHub</a>
       </div>
     </div>
   )
