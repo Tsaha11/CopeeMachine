@@ -1,3 +1,4 @@
+import GithubIcon from './GithubIcon.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, post, AuthError, API_BASE } from './api.js'
 import Composer from './Composer.jsx'
@@ -69,7 +70,7 @@ export default function Board({ user, onLogout }) {
         <span className="status">{status}</span>
         <div className="who">
           <ThemeToggle />
-          <a className="link" href="https://github.com/Tsaha11" target="_blank" rel="noreferrer">GitHub</a>
+          <a className="link" href="https://github.com/Tsaha11" target="_blank" rel="noreferrer" title="GitHub" aria-label="GitHub"><GithubIcon /></a>
           {user.picture && <img src={user.picture} alt="" referrerPolicy="no-referrer" />}
           <button className="link" onClick={logout} title={user.email}>Sign out</button>
         </div>
