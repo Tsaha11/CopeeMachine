@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { del, patch, post } from './api.js'
 import EmailIcon from './EmailIcon.jsx'
+import LockIcon from './LockIcon.jsx'
 
 export const COLORS = ['default', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray']
 
@@ -47,6 +48,8 @@ export default function Editor({ note, onClose, onError }) {
       <div className={`card editor c-${note.color}`}>
         <div className="row between">
           <input className="title" placeholder="Title" value={title} onChange={(e) => { setTitle(e.target.value); edit('title', e.target.value) }} />
+          <button className={`icon lock-btn${note.locked ? ' on' : ''}`} title={note.locked ? 'Unlock' : 'Lock'}
+                  onClick={() => act(() => patch(`/api/notes/${noteId}`, note.locked ? { locked: false } : { locked: true, keepOpen: true }))}><LockIcon locked={note.locked} size={18} /></button>
           <button className="icon" title={note.pinned ? 'Unpin' : 'Pin'} onClick={() => act(() => patch(`/api/notes/${noteId}`, { pinned: !note.pinned }))}>{note.pinned ? '📌' : '📍'}</button>
         </div>
         <textarea autoFocus placeholder="Note" value={body} onChange={(e) => { setBody(e.target.value); edit('body', e.target.value) }} />

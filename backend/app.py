@@ -22,6 +22,7 @@ from google.auth.transport import requests as grequests
 from google.oauth2 import id_token
 from pymongo import DESCENDING, MongoClient
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
 
 ROOT = Path(__file__).resolve().parent  # the backend folder is self-contained
 load_dotenv(ROOT / ".env")
@@ -72,7 +73,7 @@ app.config.update(
 
 mongo = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=8000)
 db = mongo[os.environ.get("MONGODB_DB", "copeemachine")]
-users, notes = db.users, db.notes
+users, notes, settings = db.users, db.notes, db.settings
 notes.create_index([("user", 1), ("pinned", DESCENDING), ("updated", DESCENDING)])
 
 # ---------- live sync (per user) ----------
@@ -85,9 +86,12 @@ def broadcast(user, event, data):
         q.put(msg)
 
 
-def note_json(n):
-    return {"id": n["_id"], "title": n["title"], "body": n["body"], "color": n["color"],
-            "pinned": n["pinned"], "createdAt": n["created"], "updatedAt": n["updated"]}
+def note_json(n, reveal=False):
+    """A locked note's body never leaves the server unless the passcode was just entered for it."""
+    locked = bool(n.get("locked"))
+    return {"id": n["_id"], "title": n["title"], "body": "" if locked and not reveal else n["body"],
+            "color": n["color"], "pinned": n["pinned"], "locked": locked,
+            "createdAt": n["created"], "updatedAt": n["updated"]}
 
 
 # The API only returns JSON, so it needs no scripts, frames or images of its own.
@@ -211,10 +215,56 @@ def create_note():
     return jsonify(note_json(n)), 201
 
 
+# ---------- locked notes ----------
+# One passcode, stored hashed in the `settings` collection (set it with scripts/set_passcode.py).
+# Entering it for a note opens that note for this session until it is closed again.
+UNLOCK_LIMIT, UNLOCK_WINDOW = 5, 300  # wrong passcodes per user per 5 minutes
+unlock_fails: dict[str, list] = defaultdict(list)
+
+
+def is_open(nid):
+    return nid in session.get("open", [])
+
+
+@app.post("/api/notes/<nid>/unlock")
+def unlock_note(nid):
+    user, now = session["user"], time.time()
+    fails = unlock_fails[user] = [t for t in unlock_fails[user] if now - t < UNLOCK_WINDOW]
+    if len(fails) >= UNLOCK_LIMIT:
+        return jsonify(error="Too many wrong passcodes, try again in a few minutes"), 429
+    n = notes.find_one({"_id": nid, "user": user})
+    if not n:
+        abort(404)
+    stored = settings.find_one({"_id": "passcode"}) or {}
+    code = str((request.get_json(silent=True) or {}).get("passcode", ""))
+    if not stored.get("hash"):
+        return jsonify(error="No passcode is set on the server"), 503
+    if not check_password_hash(stored["hash"], code):
+        fails.append(now)
+        return jsonify(error="Wrong passcode"), 403
+    session["open"] = [x for x in session.get("open", []) if x != nid][-49:] + [nid]
+    return jsonify(note_json(n, reveal=True))
+
+
+@app.post("/api/notes/<nid>/close")
+def close_note(nid):
+    session["open"] = [x for x in session.get("open", []) if x != nid]
+    return jsonify(ok=True)
+
+
 @app.patch("/api/notes/<nid>")
 def update_note(nid):
     d = request.get_json(silent=True) or {}
     sets = {}
+    n = notes.find_one({"_id": nid, "user": session["user"]}, {"locked": 1})
+    if not n:
+        abort(404)
+    # Reading or changing a locked note's text, or removing its lock, needs the passcode first.
+    if n.get("locked") and ("title" in d or "body" in d or d.get("locked") is False) and not is_open(nid):
+        return jsonify(error="This note is locked"), 403
+    if "locked" in d: sets["locked"] = bool(d["locked"])
+    if d.get("locked") is True and d.get("keepOpen"):  # locked from the open editor: stay editable until closed
+        session["open"] = [x for x in session.get("open", []) if x != nid][-49:] + [nid]
     if "title" in d: sets["title"] = str(d["title"])[:500]
     if "body" in d: sets["body"] = str(d["body"])[:MAX_TEXT]
     if d.get("color") in COLORS: sets["color"] = d["color"]
@@ -224,7 +274,7 @@ def update_note(nid):
     if not n:
         abort(404)
     broadcast(session["user"], "note", note_json(n))
-    return jsonify(note_json(n))
+    return jsonify(note_json(n, reveal=is_open(nid)))
 
 
 @app.delete("/api/notes/<nid>")
@@ -316,6 +366,8 @@ def email_note(nid):
     n = notes.find_one({"_id": nid, "user": session["user"]})
     if not n:
         abort(404)
+    if n.get("locked") and not is_open(nid):
+        return jsonify(error="This note is locked"), 403
     now = time.time()
     log = sent_log[session["user"]] = [t for t in sent_log[session["user"]] if now - t < EMAIL_WINDOW]
     if len(log) >= EMAIL_LIMIT:
